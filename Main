@@ -1,0 +1,181 @@
+import csv
+import random
+from typing import List, Tuple
+
+class Student:
+    def __init__(self, name: str, class_year: str, interests: List[str]):
+        self.name = name
+        self.class_year = class_year
+        self.interests = [i.strip().lower() for i in interests]
+        self.assigned_sessions = []
+
+    def __repr__(self):
+        return f"{self.name} ({self.class_year})"
+
+class Session:
+    def __init__(self, time: str, speaker: str, topic: str, room: str, capacity: int):
+        self.time = time
+        self.speaker = speaker
+        self.topic = topic.lower()
+        self.room = room
+        self.capacity = capacity
+        self.assigned_students = []
+
+    def has_space(self):
+        return len(self.assigned_students) < self.capacity
+
+    def add_student(self, student: Student):
+        if not self.has_space():
+            return False
+        # Grade cap: max 6 per grade per session
+        grade_count = sum(1 for s in self.assigned_students if s.class_year.lower() == student.class_year.lower())
+        if grade_count >= 6:
+            return False
+        self.assigned_students.append(student)
+        return True
+
+    def __repr__(self):
+        return f"{self.time} - {self.speaker} ({self.topic}) in {self.room}"
+
+class SymposiumScheduler:
+    def __init__(self):
+        self.students = []
+        self.sessions = []
+        self.class_priority = {'senior': 1, 'junior': 2, 'sophomore': 3, 'freshman': 4, '8th': 5}
+
+    def add_student(self, name: str, class_year: str, interests: List[str]):
+        self.students.append(Student(name, class_year, interests))
+
+    def add_session(self, time: str, speaker: str, topic: str, room: str, capacity: int):
+        self.sessions.append(Session(time, speaker, topic, room, capacity))
+
+    def _sort_students(self):
+        return sorted(self.students, key=lambda s: (
+            self.class_priority.get(s.class_year.lower(), 99),
+            random.random()
+        ))
+
+    def _find_matching_sessions(self, student: Student) -> List[Tuple[Session, int]]:
+        matches = []
+        for session in self.sessions:
+            if not session.has_space():
+                continue
+            if any(s.time == session.time for s in student.assigned_sessions):
+                continue
+            score = 0
+            for interest in student.interests:
+                if interest in session.topic or interest in session.speaker.lower():
+                    score += 2
+                elif any(word in session.topic for word in interest.split()):
+                    score += 1
+            matches.append((session, score))
+        return sorted(matches, key=lambda x: (-x[1], x[0].time))
+
+    def schedule(self, sessions_per_student: int = 4):
+        sorted_students = self._sort_students()
+        for student in sorted_students:
+            matching_sessions = self._find_matching_sessions(student)
+            assigned_count = 0
+            for session, score in matching_sessions:
+                if assigned_count >= sessions_per_student:
+                    break
+                if session.add_student(student):
+                    student.assigned_sessions.append(session)
+                    assigned_count += 1
+            if assigned_count < sessions_per_student:
+                for session in self.sessions:
+                    if assigned_count >= sessions_per_student:
+                        break
+                    if session.has_space() and session not in student.assigned_sessions:
+                        if not any(s.time == session.time for s in student.assigned_sessions):
+                            if session.add_student(student):
+                                student.assigned_sessions.append(session)
+                                assigned_count += 1
+        self._ensure_sessions_have_students()
+
+    def _ensure_sessions_have_students(self):
+        for session in self.sessions:
+            if not session.assigned_students:
+                for student in self.students:
+                    if len(student.assigned_sessions) < 4 and not any(s.time == session.time for s in student.assigned_sessions):
+                        if session.add_student(student):
+                            student.assigned_sessions.append(session)
+                            break
+
+    def print_schedule(self):
+        print("\n" + "="*80)
+        print("STUDENT SCHEDULE")
+        print("="*80)
+        for student in sorted(self.students, key=lambda s: s.name):
+            print(f"\n{student.name} - {student.class_year.title()}")
+            print(f"Interests: {', '.join(student.interests)}")
+            print("-" * 80)
+            if not student.assigned_sessions:
+                print("  No sessions assigned")
+            else:
+                for session in sorted(student.assigned_sessions, key=lambda s: s.time):
+                    print(f"  {session.time:15} | {session.speaker:20} | {session.room:15}")
+
+    def print_session_rosters(self):
+        print("\n" + "="*80)
+        print("SESSION ROSTERS")
+        print("="*80)
+        for session in sorted(self.sessions, key=lambda s: s.time):
+            print(f"\n{session.time} - {session.speaker}")
+            print(f"Topic: {session.topic.title()} | Room: {session.room}")
+            print(f"Capacity: {len(session.assigned_students)}/{session.capacity}")
+            print("-" * 80)
+            if not session.assigned_students:
+                print("  No students assigned")
+            else:
+                for student in sorted(session.assigned_students, key=lambda s: s.name):
+                    print(f"  {student.name} ({student.class_year})")
+
+    def export_to_csv(self, filename: str = "symposium_schedule.csv"):
+        with open(filename, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            writer.writerow(['Student Name', 'Class Year', 'Time', 'Speaker', 'Topic', 'Room'])
+            for student in sorted(self.students, key=lambda s: s.name):
+                for session in sorted(student.assigned_sessions, key=lambda s: s.time):
+                    writer.writerow([
+                        student.name,
+                        student.class_year,
+                        session.time,
+                        session.speaker,
+                        session.topic,
+                        session.room
+                    ])
+        print(f"\nSchedule exported to {filename}")
+
+    # Loaders for your CSV files
+    def load_students_from_csv(self, filename: str):
+        with open(filename, newline='', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            grade_map = {'12th': 'Senior', '11th': 'Junior', '10th': 'Sophomore', '9th': 'Freshman', '8th': '8th'}
+            for row in reader:
+                name = row['Name'].strip()
+                grade = grade_map.get(row['Grade'].strip(), row['Grade'].strip())
+                interests = [i.strip() for i in row['Presentation Preferences'].split(';') if i.strip()]
+                self.add_student(name, grade, interests)
+
+    def load_sessions_from_csv(self, filename: str):
+        with open(filename, newline='', encoding='utf-8') as f:
+            reader = csv.reader(f)
+            rows = list(reader)
+            titles = rows[0][1:]
+            for row in rows[1:]:
+                time = row[0].strip()
+                for i, room in enumerate(row[1:], start=1):
+                    if room.strip():
+                        topic = titles[i-1].strip()
+                        self.add_session(time, "Speaker TBD", topic, room.strip(), 16)
+
+# Example usage
+if __name__ == "__main__":
+    scheduler = SymposiumScheduler()
+    scheduler.load_students_from_csv("2025_Symposium Student Preference Form.csv")
+    scheduler.load_sessions_from_csv("Presentations.csv")
+    scheduler.schedule(sessions_per_student=4)
+    scheduler.print_schedule()
+    scheduler.print_session_rosters()
+    scheduler.export_to_csv("final_schedule.csv")
